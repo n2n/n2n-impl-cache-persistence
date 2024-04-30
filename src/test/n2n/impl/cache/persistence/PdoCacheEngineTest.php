@@ -17,8 +17,6 @@ class PdoCacheEngineTest extends TestCase {
 	private Pdo $pdo;
 	private DbTestPdoUtil $pdoUtil;
 
-
-
 	function setUp(): void {
 		$config = new PersistenceUnitConfig('holeradio', 'sqlite::memory:', '', '',
 				PersistenceUnitConfig::TIL_SERIALIZABLE, SqliteDialect::class);
