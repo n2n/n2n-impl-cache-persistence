@@ -27,9 +27,8 @@ class PdoCacheEngine {
 	private ?string $characteristicInsertSql = null;
 	private ?string $characteristicDeleteSql = null;
 
-
-	function __construct(private Pdo $pdo, private string $itemTableName, private string $characteristicTableName,
-			private PdoCacheDataSize $pdoCacheDataSize) {
+	function __construct(private readonly Pdo $pdo, private readonly string $dataTableName,
+			private readonly string $characteristicTableName, private readonly PdoCacheDataSize $pdoCacheDataSize) {
 	}
 
 	private function itemSelectSql(bool $characteristicsIncluded): string {
@@ -38,13 +37,13 @@ class PdoCacheEngine {
 		}
 
 		$builder = $this->pdo->getMetaData()->getDialect()->createSelectStatementBuilder($this->pdo);
-		$builder->addFrom(new QueryTable($this->itemTableName, 'i'));
+		$builder->addFrom(new QueryTable($this->dataTableName, 'd'));
 		$comparator = $builder->getWhereComparator();
-		$comparator->match(new QueryColumn(self::NAME_COLUMN, 'i'), '=',
+		$comparator->match(new QueryColumn(self::NAME_COLUMN, 'd'), '=',
 				new QueryPlaceMarker(self::NAME_COLUMN));
 
 		if ($characteristicsIncluded) {
-			$comparator->andMatch(new QueryColumn(self::CHARACTERISTICS_COLUMN, 'i'), '=',
+			$comparator->andMatch(new QueryColumn(self::CHARACTERISTICS_COLUMN, 'd'), '=',
 					new QueryPlaceMarker(self::CHARACTERISTICS_COLUMN));
 		}
 
@@ -60,11 +59,12 @@ class PdoCacheEngine {
 		}
 
 		$builder = $this->pdo->getMetaData()->getDialect()->createInsertStatementBuilder($this->pdo);
-		$builder->setTable(new QueryTable($this->itemTableName, 'i'));
-		$builder->addColumn(new QueryColumn(self::NAME_COLUMN, 'i'), new QueryPlaceMarker(self::NAME_COLUMN));
-		$builder->addColumn(new QueryColumn(self::CHARACTERISTICS_COLUMN, 'i'),
+		$builder->setTable($this->dataTableName);
+		$builder->addColumn(new QueryColumn(self::NAME_COLUMN, 'd'),
+				new QueryPlaceMarker(self::NAME_COLUMN));
+		$builder->addColumn(new QueryColumn(self::CHARACTERISTICS_COLUMN, 'd'),
 				new QueryPlaceMarker(self::CHARACTERISTICS_COLUMN));
-		$builder->addColumn(new QueryColumn(self::DATA_COLUMN, 'i'),
+		$builder->addColumn(new QueryColumn(self::DATA_COLUMN, 'd'),
 				new QueryPlaceMarker(self::DATA_COLUMN));
 
 		return $this->itemInsertSql = $builder->toSqlString();
@@ -76,16 +76,16 @@ class PdoCacheEngine {
 		}
 
 		$builder = $this->pdo->getMetaData()->getDialect()->createDeleteStatementBuilder($this->pdo);
-		$builder->setTable($this->itemTableName);
+		$builder->setTable($this->dataTableName);
 		$comparator = $builder->getWhereComparator();
 
 		if ($nameIncluded) {
-			$comparator->match(new QueryColumn(self::NAME_COLUMN, 'i'), '=',
+			$comparator->match(new QueryColumn(self::NAME_COLUMN), '=',
 					new QueryPlaceMarker(self::NAME_COLUMN));
 		}
 
 		if ($characteristicsIncluded) {
-			$comparator->andMatch(new QueryColumn(self::CHARACTERISTICS_COLUMN, 'i'), '=',
+			$comparator->andMatch(new QueryColumn(self::CHARACTERISTICS_COLUMN), '=',
 					new QueryPlaceMarker(self::CHARACTERISTICS_COLUMN));
 		}
 
@@ -130,12 +130,12 @@ class PdoCacheEngine {
 		}
 
 		$builder = $this->pdo->getMetaData()->getDialect()->createInsertStatementBuilder($this->pdo);
-		$builder->setTable(new QueryTable($this->characteristicTableName, 'c'));
-		$builder->addColumn(new QueryColumn(self::NAME_COLUMN, 'c'), new QueryPlaceMarker(self::NAME_COLUMN));
-		$builder->addColumn(new QueryColumn(self::CHARACTERISTICS_COLUMN, 'c'),
+		$builder->setTable($this->characteristicTableName);
+		$builder->addColumn(new QueryColumn(self::NAME_COLUMN), new QueryPlaceMarker(self::NAME_COLUMN));
+		$builder->addColumn(new QueryColumn(self::CHARACTERISTICS_COLUMN),
 				new QueryPlaceMarker(self::CHARACTERISTICS_COLUMN));
-		$builder->addColumn(new QueryColumn(self::DATA_COLUMN, 'c'),
-				new QueryPlaceMarker(self::DATA_COLUMN));
+		$builder->addColumn(new QueryColumn(self::CHARACTERISTIC_COLUMN),
+				new QueryPlaceMarker(self::CHARACTERISTIC_COLUMN));
 
 		return $this->characteristicInsertSql = $builder->toSqlString();
 	}
@@ -150,12 +150,12 @@ class PdoCacheEngine {
 		$comparator = $builder->getWhereComparator();
 
 		if ($nameIncluded) {
-			$comparator->match(new QueryColumn(self::NAME_COLUMN, 'c'), '=',
+			$comparator->match(new QueryColumn(self::NAME_COLUMN), '=',
 					new QueryPlaceMarker(self::NAME_COLUMN));
 		}
 
 		if ($characteristicsIncluded) {
-			$comparator->andMatch(new QueryColumn(self::CHARACTERISTICS_COLUMN, 'c'), '=',
+			$comparator->andMatch(new QueryColumn(self::CHARACTERISTICS_COLUMN), '=',
 					new QueryPlaceMarker(self::CHARACTERISTICS_COLUMN));
 		}
 
@@ -168,7 +168,7 @@ class PdoCacheEngine {
 
 	function read(string $name, array $characteristics): ?array {
 		$characteristicsStr = $this->serializeCharacteristics($characteristics);
-		$rows = $this->selectFromItemTable($name, $characteristicsStr);
+		$rows = $this->selectFromDataTable($name, $characteristicsStr);
 
 		if (empty($rows)) {
 			return null;
@@ -233,7 +233,7 @@ class PdoCacheEngine {
 		$characteristicsStr = self::serializeCharacteristics($characteristics);
 
 		$this->execInTransaction(function () use ($name, $characteristicsStr) {
-			$this->deleteFromItemTable($name, $characteristicsStr);
+			$this->deleteFromDataTable($name, $characteristicsStr);
 			$this->deleteFromCharacteristicTable($name, $characteristicsStr);
 		}, false);
 	}
@@ -243,20 +243,20 @@ class PdoCacheEngine {
 		$characteristicNeedleStrs = self::splitAndSerializeCharacteristics($characteristicNeedles);
 
 		$this->execInTransaction(function () use (&$nameNeedle, &$characteristicsStr, &$characteristicNeedleStrs) {
-			$this->deleteFromItemTable($nameNeedle, $characteristicsStr);
+			$this->deleteFromDataTable($nameNeedle, $characteristicsStr);
 			$this->deleteFromCharacteristicTable($nameNeedle, $characteristicsStr);
 
 			foreach ($this->selectFromCharacteristicTable($nameNeedle, $characteristicNeedleStrs) as $result) {
 				$name = $result[self::NAME_COLUMN];
 				$characteristicsStr = $result[self::CHARACTERISTICS_COLUMN];
-				$this->deleteFromItemTable($name, $characteristicsStr);
+				$this->deleteFromDataTable($name, $characteristicsStr);
 				$this->deleteFromCharacteristicTable($name, $characteristicsStr);
 			}
 		}, true);
 	}
 
 	function clear(): void {
-		$this->deleteFromItemTable(null, null);
+		$this->deleteFromDataTable(null, null);
 		$this->deleteFromCharacteristicTable(null, null);
 	}
 
@@ -267,11 +267,11 @@ class PdoCacheEngine {
 		$rows = [];
 		$this->execInTransaction(function ()
 				use (&$nameNeedle, &$characteristicsStr, &$rows, &$characteristicNeedleStrs) {
-			$rows = $this->selectFromItemTable($nameNeedle, $characteristicsStr);
+			$rows = $this->selectFromDataTable($nameNeedle, $characteristicsStr);
 
 			foreach ($this->selectFromCharacteristicTable($nameNeedle, $characteristicNeedleStrs) as $result) {
 				array_push($rows,
-						...$this->selectFromItemTable($result[self::NAME_COLUMN], $result[self::CHARACTERISTICS_COLUMN]));
+						...$this->selectFromDataTable($result[self::NAME_COLUMN], $result[self::CHARACTERISTICS_COLUMN]));
 			}
 		}, true);
 
@@ -293,30 +293,32 @@ class PdoCacheEngine {
 		$dataStr = serialize($data);
 
 		$this->execInTransaction(function () use (&$name, &$characteristicsStr, &$dataStr, &$characteristics) {
-			$this->deleteFromItemTable($name, $characteristicsStr);
+			$this->deleteFromDataTable($name, $characteristicsStr);
 			$this->deleteFromCharacteristicTable($name, $characteristicsStr);
-			$this->insertIntoItemTable($name, $characteristicsStr, $dataStr);
+			$this->insertIntoDataTable($name, $characteristicsStr, $dataStr);
 			if (count($characteristics) > 1) {
 				$this->insertIntoCharacteristicTable($name, $characteristicsStr, $characteristics);
 			}
 		}, false);
 	}
 
-	private function deleteFromItemTable(?string $name, ?string $characteristicsStr): void {
+	private function deleteFromDataTable(?string $name, ?string $characteristicsStr): void {
 		$stmt = $this->pdo->prepare($this->itemDeleteSql($name !== null, $characteristicsStr !== null));
+
 		$stmt->execute([self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $characteristicsStr]);
 	}
 
-	private function insertIntoItemTable(string $name, string $characteristicsStr, ?string $dataStr): void {
+	private function insertIntoDataTable(string $name, string $characteristicsStr, ?string $dataStr): void {
 		$stmt = $this->pdo->prepare($this->itemInsertSql());
+
 		$stmt->execute([
 			self::NAME_COLUMN => $name,
-			self::CHARACTERISTICS_COLUMN, $characteristicsStr,
+			self::CHARACTERISTICS_COLUMN => $characteristicsStr,
 			self::DATA_COLUMN => $dataStr
 		]);
 	}
 
-	private function selectFromItemTable(string $name, ?string $characteristicsStr): array {
+	private function selectFromDataTable(string $name, ?string $characteristicsStr): array {
 		$stmt = $this->pdo->prepare($this->itemSelectSql($characteristicsStr !== null));
 		$stmt->execute([self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $characteristicsStr]);
 
@@ -377,20 +379,20 @@ class PdoCacheEngine {
 	}
 
 
-	function doesItemTableExist(): bool {
-		return $this->pdo->getMetaData()->getDatabase()->containsMetaEntityName($this->itemTableName);
+	function doesDataTableExist(): bool {
+		return $this->pdo->getMetaData()->getDatabase()->containsMetaEntityName($this->dataTableName);
 	}
 
-	function createItemTable(): void {
+	function createDataTable(): void {
 		$metaData = $this->pdo->getMetaData();
 		$database = $metaData->getDatabase();
-		$itemTable = $database->createMetaEntityFactory()->createTable($this->itemTableName);
-		$columnFactory = $itemTable->createColumnFactory();
+		$dataTable = $database->createMetaEntityFactory()->createTable($this->dataTableName);
+		$columnFactory = $dataTable->createColumnFactory();
 		$columnFactory->createStringColumn(self::NAME_COLUMN, self::MAX_LENGTH)->setNullAllowed(false);
 		$columnFactory->createStringColumn(self::CHARACTERISTICS_COLUMN, self::MAX_LENGTH)->setNullAllowed(false);
 
-		$itemTable->createIndex(IndexType::PRIMARY, [self::NAME_COLUMN, self::CHARACTERISTICS_COLUMN]);
-		$itemTable->createIndex(IndexType::INDEX, [self::CHARACTERISTICS_COLUMN]);
+		$dataTable->createIndex(IndexType::PRIMARY, [self::NAME_COLUMN, self::CHARACTERISTICS_COLUMN]);
+		$dataTable->createIndex(IndexType::INDEX, [self::CHARACTERISTICS_COLUMN]);
 
 		switch ($this->pdoCacheDataSize) {
 			case PdoCacheDataSize::STRING:
@@ -418,8 +420,7 @@ class PdoCacheEngine {
 		$columnFactory->createStringColumn(self::CHARACTERISTIC_COLUMN, self::MAX_LENGTH)->setNullAllowed(false);
 
 		$characteristicTable->createIndex(IndexType::PRIMARY, [self::NAME_COLUMN, self::CHARACTERISTICS_COLUMN, self::CHARACTERISTIC_COLUMN]);
-		$characteristicTable->createIndex(IndexType::INDEX, [self::CHARACTERISTICS_COLUMN]);
-		$characteristicTable->createIndex(IndexType::INDEX, [self::CHARACTERISTIC_COLUMN]);
+		$characteristicTable->createIndex(IndexType::INDEX, [self::CHARACTERISTIC_COLUMN, self::NAME_COLUMN]);
 
 		$metaData->getMetaManager()->flush();
 	}

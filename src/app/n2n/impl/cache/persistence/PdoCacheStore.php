@@ -16,13 +16,13 @@ class PdoCacheStore implements CacheStore {
 	function __construct(private Pdo $pdo) {
 	}
 
-	function setCacheTableName(string $cacheTableName): static {
-		$this->cacheTableName = $cacheTableName;
+	function setItemTableName(string $itemTableName): static {
+		$this->itemTableName = $itemTableName;
 		$this->pdoCacheEngine = null;
 		return $this;
 	}
 
-	function getCachedTableName(): string {
+	function getItemTableName(): string {
 		return $this->itemTableName;
 	}
 
@@ -63,6 +63,7 @@ class PdoCacheStore implements CacheStore {
 
 		return $tablesCreated;
 	}
+
 	public function store(string $name, array $characteristics, mixed $data, \DateTime $lastMod = null): void {
 		$this->tableCheckedCall(function () use (&$name, &$characteristics, &$data) {
 			$this->pdoCacheEngine->write($name, $characteristics, $data);

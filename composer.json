@@ -41,6 +41,8 @@
 		}
 	},
 	"require-dev" : {
-		"phpunit/phpunit" : "^9.5"
-	}
+		"phpunit/phpunit" : "^9.5",
+        "n2n/n2n-impl-persistence-meta": "^7.4",
+        "n2n/n2n-test": "^7.4"
+    }
 }
