@@ -8,7 +8,7 @@ use n2n\util\ex\NotYetImplementedException;
 use n2n\persistence\PdoException;
 
 class PdoCacheStore implements CacheStore {
-	private string $itemTableName = 'cached_item';
+	private string $dataTableName = 'cached_data';
 	private string $characteristicTableName = 'cached_characteristic';
 
 	private ?PdoCacheEngine $pdoCacheEngine = null;
@@ -16,14 +16,14 @@ class PdoCacheStore implements CacheStore {
 	function __construct(private Pdo $pdo) {
 	}
 
-	function setItemTableName(string $itemTableName): static {
-		$this->itemTableName = $itemTableName;
+	function setDataTableName(string $dataTableName): static {
+		$this->dataTableName = $dataTableName;
 		$this->pdoCacheEngine = null;
 		return $this;
 	}
 
-	function getItemTableName(): string {
-		return $this->itemTableName;
+	function getDataTableName(): string {
+		return $this->dataTableName;
 	}
 
 	public function setCharacteristicTableName(string $characteristicTableName): static {

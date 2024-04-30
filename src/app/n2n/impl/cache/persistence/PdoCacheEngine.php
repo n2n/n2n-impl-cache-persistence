@@ -11,6 +11,8 @@ use n2n\util\UnserializationFailedException;
 use n2n\util\cache\CorruptedCacheStoreException;
 use n2n\persistence\meta\structure\IndexType;
 use n2n\util\ex\IllegalStateException;
+use n2n\util\col\ArrayUtils;
+use n2n\util\type\ArgUtils;
 
 class PdoCacheEngine {
 	const NAME_COLUMN = 'name';
@@ -20,7 +22,7 @@ class PdoCacheEngine {
 	const CREATED_COLUMN = 'created';
 	const MAX_LENGTH = 255;
 	const MAX_TEXT_SIZE = 134217720;
-	private ?string $itemSelectSql = null;
+	private ?string $dataSelectSql = null;
 	private ?string $itemInsertSql = null;
 	private ?string $itemDeleteSql = null;
 	private ?string $characteristicSelectSql = null;
@@ -31,24 +33,27 @@ class PdoCacheEngine {
 			private readonly string $characteristicTableName, private readonly PdoCacheDataSize $pdoCacheDataSize) {
 	}
 
-	private function itemSelectSql(bool $characteristicsIncluded): string {
-		if ($this->itemSelectSql !== null && $characteristicsIncluded) {
-			return $this->itemSelectSql;
+	private function dataSelectSql(bool $nameIncluded, bool $characteristicsIncluded): string {
+		if ($this->dataSelectSql !== null && $nameIncluded && $characteristicsIncluded) {
+			return $this->dataSelectSql;
 		}
 
 		$builder = $this->pdo->getMetaData()->getDialect()->createSelectStatementBuilder($this->pdo);
 		$builder->addFrom(new QueryTable($this->dataTableName, 'd'));
 		$comparator = $builder->getWhereComparator();
-		$comparator->match(new QueryColumn(self::NAME_COLUMN, 'd'), '=',
-				new QueryPlaceMarker(self::NAME_COLUMN));
 
-		if ($characteristicsIncluded) {
-			$comparator->andMatch(new QueryColumn(self::CHARACTERISTICS_COLUMN, 'd'), '=',
-					new QueryPlaceMarker(self::CHARACTERISTICS_COLUMN));
+		if ($nameIncluded) {
+			$comparator->match(new QueryColumn(self::NAME_COLUMN), '=',
+					new QueryPlaceMarker(self::NAME_COLUMN));
 		}
 
 		if ($characteristicsIncluded) {
-			return $this->itemSelectSql = $builder->toSqlString();
+			$comparator->andMatch(new QueryColumn(self::CHARACTERISTICS_COLUMN), '=',
+					new QueryPlaceMarker(self::CHARACTERISTICS_COLUMN));
+		}
+
+		if ($nameIncluded && $characteristicsIncluded) {
+			return $this->dataSelectSql = $builder->toSqlString();
 		}
 		return $builder->toSqlString();
 	}
@@ -106,12 +111,12 @@ class PdoCacheEngine {
 		$comparator = $builder->getWhereComparator();
 
 		if ($nameIncluded) {
-			$comparator->match(new QueryColumn(self::NAME_COLUMN, 'c'), '=',
+			$comparator->match(new QueryColumn(self::NAME_COLUMN), '=',
 					new QueryPlaceMarker(self::NAME_COLUMN));
 		}
 
 		if ($characteristicIncluded) {
-			$comparator->andMatch(new QueryColumn(self::CHARACTERISTIC_COLUMN, 'c'), '=',
+			$comparator->andMatch(new QueryColumn(self::CHARACTERISTIC_COLUMN), '=',
 					new QueryPlaceMarker(self::CHARACTERISTIC_COLUMN));
 		}
 
@@ -246,6 +251,10 @@ class PdoCacheEngine {
 			$this->deleteFromDataTable($nameNeedle, $characteristicsStr);
 			$this->deleteFromCharacteristicTable($nameNeedle, $characteristicsStr);
 
+			if (empty($characteristicNeedleStrs)) {
+				return;
+			}
+
 			foreach ($this->selectFromCharacteristicTable($nameNeedle, $characteristicNeedleStrs) as $result) {
 				$name = $result[self::NAME_COLUMN];
 				$characteristicsStr = $result[self::CHARACTERISTICS_COLUMN];
@@ -260,7 +269,7 @@ class PdoCacheEngine {
 		$this->deleteFromCharacteristicTable(null, null);
 	}
 
-	function findBy(string $nameNeedle, ?array $characteristicNeedles): array {
+	function findBy(?string $nameNeedle, ?array $characteristicNeedles): array {
 		$characteristicsStr = self::serializeCharacteristics($characteristicNeedles);
 		$characteristicNeedleStrs = self::splitAndSerializeCharacteristics($characteristicNeedles);
 
@@ -268,6 +277,10 @@ class PdoCacheEngine {
 		$this->execInTransaction(function ()
 				use (&$nameNeedle, &$characteristicsStr, &$rows, &$characteristicNeedleStrs) {
 			$rows = $this->selectFromDataTable($nameNeedle, $characteristicsStr);
+
+			if (empty($characteristicNeedleStrs)) {
+				return;
+			}
 
 			foreach ($this->selectFromCharacteristicTable($nameNeedle, $characteristicNeedleStrs) as $result) {
 				array_push($rows,
@@ -305,7 +318,8 @@ class PdoCacheEngine {
 	private function deleteFromDataTable(?string $name, ?string $characteristicsStr): void {
 		$stmt = $this->pdo->prepare($this->itemDeleteSql($name !== null, $characteristicsStr !== null));
 
-		$stmt->execute([self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $characteristicsStr]);
+		$stmt->execute(ArrayUtils::filterNotNull(
+				[self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $characteristicsStr]));
 	}
 
 	private function insertIntoDataTable(string $name, string $characteristicsStr, ?string $dataStr): void {
@@ -318,9 +332,10 @@ class PdoCacheEngine {
 		]);
 	}
 
-	private function selectFromDataTable(string $name, ?string $characteristicsStr): array {
-		$stmt = $this->pdo->prepare($this->itemSelectSql($characteristicsStr !== null));
-		$stmt->execute([self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $characteristicsStr]);
+	private function selectFromDataTable(?string $name, ?string $characteristicsStr): array {
+		$stmt = $this->pdo->prepare($this->dataSelectSql($name !== null, $characteristicsStr !== null));
+		$stmt->execute(ArrayUtils::filterNotNull(
+				[self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $characteristicsStr]));
 
 		return $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
@@ -328,7 +343,8 @@ class PdoCacheEngine {
 
 	private function deleteFromCharacteristicTable(?string $name, ?string $characteristicsStr): void {
 		$stmt = $this->pdo->prepare($this->characteristicDeleteSql($name !== null,$characteristicsStr !== null));
-		$stmt->execute([self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $characteristicsStr]);
+		$stmt->execute(ArrayUtils::filterNotNull(
+				[self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $characteristicsStr]));
 	}
 
 	private function insertIntoCharacteristicTable(string $name, string $characteristicsStr, array $characteristics): void {
@@ -339,20 +355,19 @@ class PdoCacheEngine {
 		}
 	}
 
-	private function selectFromCharacteristicTable(?string $nameNeedle, ?array $characteristicNeedleStrs = []): array {
-		$selectSql = $this->characteristicSelectSql($nameNeedle !== null, $characteristicNeedleStrs !== null);
-
+	private function selectFromCharacteristicTable(?string $nameNeedle, array $characteristicNeedleStrs): array {
+		$selectSql = $this->characteristicSelectSql($nameNeedle !== null, true);
 		$stmt = $this->pdo->prepare($selectSql);
 
-		if (empty($characteristicNeedleStrs)) {
-			$characteristicNeedleStrs = [null];
-		}
+		ArgUtils::assertTrue(!empty($characteristicNeedleStrs));
 
 		$needlesNum = count($characteristicNeedleStrs);
 		$resultRows = [];
 		$hitMap = [];
 		foreach ($characteristicNeedleStrs as $characteristicStr) {
-			$stmt->execute([self::NAME_COLUMN => $nameNeedle, self::CHARACTERISTIC_COLUMN => $characteristicStr]);
+			$stmt->execute(ArrayUtils::filterNotNull(
+					[self::NAME_COLUMN => $nameNeedle, self::CHARACTERISTIC_COLUMN => $characteristicStr]));
+
 			while (false !== ($row = $stmt->fetch(\PDO::FETCH_ASSOC))) {
 				$name = $row[self::NAME_COLUMN];
 				if (!isset($hitMap[$name])) {
@@ -362,15 +377,16 @@ class PdoCacheEngine {
 				$characteristicsStr = $row[self::CHARACTERISTICS_COLUMN];
 				if (!isset($hitMap[$name][$characteristicsStr])) {
 					$hitMap[$name][$characteristicsStr] = 1;
+				} else {
+					$hitMap[$name][$characteristicsStr]++;
+				}
+
+				if ($hitMap[$name][$characteristicsStr] === $needlesNum) {
+					$resultRows[] = [self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $row[self::CHARACTERISTICS_COLUMN]];
 					continue;
 				}
 
-				$hitMap[$name][$characteristicsStr]++;
-				if ($hitMap[$name][$characteristicsStr] === $needlesNum) {
-					$resultRows[] = [self::NAME_COLUMN => $name, self::CHARACTERISTICS_COLUMN => $row[self::CHARACTERISTICS_COLUMN]];
-				}
-
-				// should never happen, used logic error protection
+				// should never happen, logic error protection
 				IllegalStateException::assertTrue($hitMap[$name][$characteristicsStr] <= $needlesNum);
 			}
 		}
