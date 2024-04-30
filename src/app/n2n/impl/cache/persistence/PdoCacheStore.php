@@ -4,13 +4,13 @@ namespace n2n\impl\cache\persistence;
 use n2n\util\cache\CacheStore;
 use n2n\util\cache\CacheItem;
 use n2n\persistence\Pdo;
-use n2n\util\ex\NotYetImplementedException;
 use n2n\persistence\PdoException;
 
 class PdoCacheStore implements CacheStore {
 	private string $dataTableName = 'cached_data';
 	private string $characteristicTableName = 'cached_characteristic';
-
+	private PdoCacheDataSize $pdoCacheDataSize = PdoCacheDataSize::TEXT;
+	private bool $tableAutoCreated = true;
 	private ?PdoCacheEngine $pdoCacheEngine = null;
 
 	function __construct(private Pdo $pdo) {
@@ -36,11 +36,34 @@ class PdoCacheStore implements CacheStore {
 		return $this->characteristicTableName;
 	}
 
+	public function setPdoCacheDataSize(PdoCacheDataSize $pdoCacheDataSize): PdoCacheStore {
+		$this->pdoCacheDataSize = $pdoCacheDataSize;
+		return $this;
+	}
+
+	public function getPdoCacheDataSize(): PdoCacheDataSize {
+		return $this->pdoCacheDataSize;
+	}
+
+	public function isTableAutoCreated(): bool {
+		return $this->tableAutoCreated;
+	}
+
+	public function setTableAutoCreated(bool $tableAutoCreated): PdoCacheStore {
+		$this->tableAutoCreated = $tableAutoCreated;
+		return $this;
+	}
+
 	private function tableCheckedCall(\Closure $closure): mixed {
+		if ($this->pdoCacheEngine === null) {
+			$this->pdoCacheEngine = new PdoCacheEngine($this->pdo, $this->dataTableName, $this->characteristicTableName,
+					$this->pdoCacheDataSize);
+		}
+
 		try {
 			return $closure();
 		} catch (PdoException $e) {
-			if (!$this->checkTables()) {
+			if (!$this->tableAutoCreated || !$this->checkTables()) {
 				throw $e;
 			}
 
@@ -51,13 +74,13 @@ class PdoCacheStore implements CacheStore {
 	private function checkTables(): bool {
 		$tablesCreated = false;
 
-		if (!$this->pdoCacheEngine->doesItemTableExist()) {
-			$this->pdoCacheEngine->createItemTable();
+		if (!$this->pdoCacheEngine->doesDataTableExist()) {
+			$this->pdoCacheEngine->createDataTable();
 			$tablesCreated = true;
 		}
 
 		if (!$this->pdoCacheEngine->doesCharacteristicTableExist()) {
-			$this->pdoCacheEngine->createItemTable();
+			$this->pdoCacheEngine->createCharacteristicTable();
 			$tablesCreated = true;
 		}
 
@@ -71,14 +94,18 @@ class PdoCacheStore implements CacheStore {
 	}
 
 	public function get(string $name, array $characteristics): ?CacheItem {
-		$result = $this->tableCheckedCall(function () use (&$name, &$characteristics, &$data) {
+		$result = $this->tableCheckedCall(function () use (&$name, &$characteristics) {
 			return $this->pdoCacheEngine->read($name, $characteristics);
 		});
 
 		return self::parseCacheItem($result);
 	}
 
-	private static function parseCacheItem(array $result): CacheItem {
+	private static function parseCacheItem(?array $result): ?CacheItem {
+		if ($result === null) {
+			return null;
+		}
+
 		return new CacheItem($result[PdoCacheEngine::NAME_COLUMN], $result[PdoCacheEngine::CHARACTERISTICS_COLUMN],
 				$result[PdoCacheEngine::DATA_COLUMN]);
 	}
@@ -91,7 +118,7 @@ class PdoCacheStore implements CacheStore {
 
 	public function findAll(string $name, array $characteristicNeedles = null): array {
 		$results = $this->tableCheckedCall(function () use (&$name, &$characteristics) {
-			$this->pdoCacheEngine->delete($name, $characteristics);
+			return $this->pdoCacheEngine->findBy($name, $characteristics);
 		});
 
 		return array_map(fn ($result) => self::parseCacheItem($result), $results);
@@ -104,7 +131,9 @@ class PdoCacheStore implements CacheStore {
 	}
 
 	public function clear(): void {
-		$this->pdoCacheEngine->clear();
+		$this->tableCheckedCall(function () use (&$name, &$characteristics) {
+			$this->pdoCacheEngine->clear();
+		});
 	}
 }
 

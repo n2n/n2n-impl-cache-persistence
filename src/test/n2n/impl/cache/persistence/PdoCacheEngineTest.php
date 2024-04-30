@@ -10,6 +10,8 @@ use n2n\test\DbTestPdoUtil;
 use n2n\persistence\meta\structure\Table;
 use n2n\persistence\meta\structure\StringColumn;
 use n2n\persistence\meta\structure\IndexType;
+use n2n\persistence\PdoException;
+use n2n\persistence\meta\structure\DuplicateMetaElementException;
 
 class PdoCacheEngineTest extends TestCase {
 	private Pdo $pdo;
@@ -319,7 +321,6 @@ class PdoCacheEngineTest extends TestCase {
 				$rows[0]);
 	}
 
-
 	function testDeleteBySingleCharacteristics(): void {
 		$engine = $this->createEngine();
 
@@ -429,4 +430,33 @@ class PdoCacheEngineTest extends TestCase {
 		$this->assertCount(0, $rows);
 	}
 
+	function testClear(): void {
+		$engine = $this->createEngine();
+
+		$engine->createDataTable();
+		$engine->createCharacteristicTable();
+
+		$engine->write('holeradio', ['key' => 'value'], 'data0');
+		$engine->write('holeradio2', ['key' => 'value0-2'], 'data0-2');
+
+		$engine->write('holeradio', ['key' => 'value', 'o-key' => 'o-value', 'to-key' => 'to-value'], 'data1');
+		$engine->write('holeradio', ['key' => 'value1-2', 'o-key' => 'o-value', 'to-key' => 'to-value'], 'data1-2');
+
+		$this->assertCount(4, $this->pdoUtil->select('data', null));
+		$this->assertCount(6, $this->pdoUtil->select('characteristic', null));
+
+		$engine->clear();
+
+		$this->assertCount(0, $this->pdoUtil->select('data', null));
+		$this->assertCount(0, $this->pdoUtil->select('characteristic', null));
+	}
+
+	function testCreateDataTableExceptionWhenExists(): void {
+		$engine = $this->createEngine();
+
+		$engine->createDataTable();
+
+		$this->expectException(DuplicateMetaElementException::class);
+		$engine->createDataTable();
+	}
 }
